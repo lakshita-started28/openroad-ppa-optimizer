@@ -55,11 +55,11 @@ jobs:
       - name: Run OpenROAD Flow (Placement Stage)
         run: |
           docker run --rm \
-          -v ${{ github.workspace }}:/workspace \
-          -w /workspace/OpenROAD-flow-scripts/flow \
-          openroad/orfs:latest \
-          make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk do-3_5_place
-
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace/OpenROAD-flow-scripts/flow \
+            openroad/orfs:latest \
+            make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk do-place
+          
       - name: Extract metrics
         run: |
           mkdir -p results
