@@ -1,0 +1,85 @@
+name: PPA Parameter Sweep
+
+on:
+  workflow_dispatch:
+    inputs:
+      design:
+        description: 'Design name (gcd, aes, ibex)'
+        required: true
+        default: 'aes'
+        type: choice
+        options:
+          - gcd
+          - aes
+          - ibex
+      config_ids:
+        description: 'Comma-separated config IDs (e.g., 1,2,3,4,5)'
+        required: true
+        default: '1,2,3,4,5'
+
+jobs:
+  run-openroad:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        config_id: ${{ fromJSON(format('[{0}]', github.event.inputs.config_ids)) }}
+      fail-fast: false
+      max-parallel: 5
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Pull OpenROAD Docker image
+        run: |
+          docker pull openroad/orfs:latest
+      
+      - name: Clone OpenROAD-flow-scripts
+        run: |
+          git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
+          ls -la OpenROAD-flow-scripts/
+      
+      - name: Modify config for run ${{ matrix.config_id }}
+        run: |
+          python3 scripts/modify_config.py ${{ github.event.inputs.design }} ${{ matrix.config_id }} OpenROAD-flow-scripts
+      
+      - name: Run OpenROAD to CTS stage
+        run: |
+          cd OpenROAD-flow-scripts/flow
+          
+          docker run --rm \
+            -v $(pwd):/OpenROAD-flow-scripts/flow \
+            -w /OpenROAD-flow-scripts/flow \
+            openroad/orfs:latest \
+            make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk do-5_1_cts || true
+          
+          ls -la reports/nangate45/${{ github.event.inputs.design }}/base/ || echo "No reports generated"
+      
+      - name: Extract metrics
+        run: |
+          mkdir -p results
+          
+          # Find the most recent report file
+          REPORT_FILE=$(find OpenROAD-flow-scripts/flow/reports/nangate45/${{ github.event.inputs.design }}/base/ -name "*report.txt" -o -name "*final*.rpt" | head -n 1)
+          
+          if [ -z "$REPORT_FILE" ]; then
+            echo "ERROR: No report file found"
+            exit 1
+          fi
+          
+          echo "Using report: $REPORT_FILE"
+          
+          python3 scripts/extract_metrics.py "$REPORT_FILE" ${{ matrix.config_id }} results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+      
+      - name: Upload results as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppa-results-${{ github.event.inputs.design }}-config${{ matrix.config_id }}
+          path: results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+          retention-days: 7
