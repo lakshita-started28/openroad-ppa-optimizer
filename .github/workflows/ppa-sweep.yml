@@ -4,18 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       design:
-        description: 'Design name (gcd, aes, ibex)'
+        description: "Design name (gcd, aes, ibex)"
         required: true
-        default: 'gcd'
+        default: "gcd"
         type: choice
         options:
           - gcd
           - aes
           - ibex
+
       config_ids:
-        description: 'Comma-separated config IDs (e.g., 1,2,3,4,5)'
+        description: "Comma-separated config IDs"
         required: true
-        default: '1,2,3,4,5'
+        default: "1,2,3,4,5"
 
 jobs:
   run-openroad:
@@ -39,24 +40,17 @@ jobs:
       - name: Pull OpenROAD Docker image
         run: docker pull openroad/orfs:latest
 
-      - name: Clone OpenROAD-flow-scripts
-        run: |
-          git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
-
-      - name: Modify config for run ${{ matrix.config_id }}
-        run: |
-          python3 scripts/modify_config.py \
-          ${{ github.event.inputs.design }} \
-          ${{ matrix.config_id }} \
-          OpenROAD-flow-scripts
-
-      - name: Run OpenROAD flow
+      - name: Run OpenROAD Flow
         run: |
           docker run --rm \
           -v ${{ github.workspace }}:/workspace \
-          -w /workspace/OpenROAD-flow-scripts/flow \
+          -w /OpenROAD-flow-scripts/flow \
           openroad/orfs:latest \
-          make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk
+          bash -c "
+          cp -r /OpenROAD-flow-scripts . &&
+          cd OpenROAD-flow-scripts/flow &&
+          make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config.mk
+          "
 
       - name: Extract metrics
         run: |
@@ -65,36 +59,16 @@ jobs:
           REPORT_DIR="OpenROAD-flow-scripts/flow/reports/nangate45/${{ github.event.inputs.design }}/base"
 
           if [ ! -d "$REPORT_DIR" ]; then
-            echo "No report directory found"
-
-            echo '{
-              "config_id": '${{ matrix.config_id }}',
-              "area_um2": null,
-              "wns_ns": null,
-              "tns_ns": null,
-              "cell_count": null,
-              "net_count": null,
-              "status": "no_reports"
-            }' > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
-
+            echo '{"config_id": '${{ matrix.config_id }}', "status":"no_reports"}' \
+            > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
             exit 0
           fi
 
           REPORT_FILE=$(find "$REPORT_DIR" -name "*.rpt" -o -name "*.txt" | head -n 1)
 
           if [ -z "$REPORT_FILE" ]; then
-            echo "Report file missing"
-
-            echo '{
-              "config_id": '${{ matrix.config_id }}',
-              "area_um2": null,
-              "wns_ns": null,
-              "tns_ns": null,
-              "cell_count": null,
-              "net_count": null,
-              "status": "report_missing"
-            }' > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
-
+            echo '{"config_id": '${{ matrix.config_id }}', "status":"report_missing"}' \
+            > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
             exit 0
           fi
 
