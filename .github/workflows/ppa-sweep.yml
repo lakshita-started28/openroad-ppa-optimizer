@@ -12,7 +12,6 @@ on:
           - gcd
           - aes
           - ibex
-
       config_ids:
         description: "Comma-separated config IDs"
         required: true
@@ -44,11 +43,9 @@ jobs:
         run: |
           docker run --rm \
           -v ${{ github.workspace }}:/workspace \
-          -w /OpenROAD-flow-scripts/flow \
           openroad/orfs:latest \
           bash -c "
-          cp -r /OpenROAD-flow-scripts . &&
-          cd OpenROAD-flow-scripts/flow &&
+          cd /OpenROAD-flow-scripts/flow &&
           make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config.mk
           "
 
