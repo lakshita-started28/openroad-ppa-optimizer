@@ -61,22 +61,51 @@ jobs:
           
           ls -la reports/nangate45/${{ github.event.inputs.design }}/base/ || echo "No reports generated"
       
+      
       - name: Extract metrics
         run: |
           mkdir -p results
-          
-          # Find the most recent report file
-          REPORT_FILE=$(find OpenROAD-flow-scripts/flow/reports/nangate45/${{ github.event.inputs.design }}/base/ -name "*report.txt" -o -name "*final*.rpt" | head -n 1)
-          
-          if [ -z "$REPORT_FILE" ]; then
-            echo "ERROR: No report file found"
-            exit 1
+
+          REPORT_DIR="OpenROAD-flow-scripts/flow/reports/nangate45/${{ github.event.inputs.design }}/base"
+
+          if [ ! -d "$REPORT_DIR" ]; then
+            echo "No report directory found. OpenROAD likely stopped earlier."
+
+            echo '{
+              "config_id": '${{ matrix.config_id }}',
+              "area_um2": null,
+              "wns_ns": null,
+              "tns_ns": null,
+              "cell_count": null,
+              "net_count": null,
+              "status": "no_reports"
+            }' > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+
+            exit 0
           fi
-          
+
+          REPORT_FILE=$(find "$REPORT_DIR" -name "*.rpt" -o -name "*.txt" | head -n 1)
+
+          if [ -z "$REPORT_FILE" ]; then
+            echo "Report directory exists but no report file found"
+
+            echo '{
+              "config_id": '${{ matrix.config_id }}',
+              "area_um2": null,
+              "wns_ns": null,
+              "tns_ns": null,
+              "cell_count": null,
+              "net_count": null,
+              "status": "report_missing"
+            }' > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+
+            exit 0
+          fi
+
           echo "Using report: $REPORT_FILE"
-          
+
           python3 scripts/extract_metrics.py "$REPORT_FILE" ${{ matrix.config_id }} results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
-      
+    
       - name: Upload results as artifact
         uses: actions/upload-artifact@v4
         with:
