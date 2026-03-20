@@ -12,7 +12,7 @@ on:
           - gcd
           - aes
       config_ids:
-        description: "Config IDs (e.g., 1,2,3)"
+        description: "Config IDs (1,2,3)"
         required: true
         default: "1,2,3"
 
@@ -24,32 +24,25 @@ jobs:
       matrix:
         config_id: ${{ fromJSON(format('[{0}]', github.event.inputs.config_ids)) }}
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 2
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Install OpenROAD
+      - name: Free disk space
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
-          
-          # Download prebuilt OpenROAD binary
-          wget https://github.com/The-OpenROAD-Project/OpenROAD/releases/download/v2.0.16697/openroad_2.0_amd64-ubuntu22.04.deb
-          
-          # Install it
-          sudo apt-get install -y ./openroad_2.0_amd64-ubuntu22.04.deb
-          
-          # Verify
-          openroad -version
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          df -h
       
-      - name: Clone ORFS
+      - name: Clone OpenROAD-flow-scripts
         run: |
           git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
+      
+      - name: Install OpenROAD
+        run: |
           cd OpenROAD-flow-scripts
-          
-          # Install dependencies
           sudo ./setup.sh
       
       - name: Modify config
@@ -59,34 +52,28 @@ jobs:
             ${{ matrix.config_id }} \
             OpenROAD-flow-scripts
       
-      - name: Run flow to placement
+      - name: Run synthesis
         run: |
           cd OpenROAD-flow-scripts/flow
           
-          # Run just synthesis + floorplan + placement
-          make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk \
-            do-2_1_floorplan do-3_1_place_gp
+          make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk synth
           
-          echo "=== Checking outputs ==="
           ls -la logs/nangate45/${{ github.event.inputs.design }}/base/
       
       - name: Extract metrics
         run: |
           mkdir -p results
           
-          # Extract from floorplan log
-          LOG="OpenROAD-flow-scripts/flow/logs/nangate45/${{ github.event.inputs.design }}/base/2_1_floorplan.log"
+          LOG="OpenROAD-flow-scripts/flow/logs/nangate45/${{ github.event.inputs.design }}/base/1_1_yosys.log"
           
           if [ -f "$LOG" ]; then
-            AREA=$(grep "Design area" "$LOG" | grep -oE '[0-9]+\.[0-9]+' | head -1)
-            UTIL=$(grep "Util" "$LOG" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+            CELLS=$(grep "Number of cells:" "$LOG" | grep -oE '[0-9]+' | head -1)
             
             cat > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
           {
             "config_id": ${{ matrix.config_id }},
             "design": "${{ github.event.inputs.design }}",
-            "area_um2": ${AREA:-null},
-            "utilization": ${UTIL:-null},
+            "cell_count": ${CELLS:-null},
             "status": "success"
           }
           EOF
@@ -95,8 +82,7 @@ jobs:
           {
             "config_id": ${{ matrix.config_id }},
             "design": "${{ github.event.inputs.design }}",
-            "area_um2": null,
-            "utilization": null,
+            "cell_count": null,
             "status": "failed"
           }
           EOF
