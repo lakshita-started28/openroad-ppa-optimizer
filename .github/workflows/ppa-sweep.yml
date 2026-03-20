@@ -52,14 +52,14 @@ jobs:
           ${{ matrix.config_id }} \
           OpenROAD-flow-scripts
 
-      - name: Run OpenROAD Flow (Placement Stage)
+      - name: Run OpenROAD Flow (Placement Only - No CTS)
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace/OpenROAD-flow-scripts/flow \
             openroad/orfs:latest \
-            make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk do-place
-          
+            make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk do-3_3_place_gp
+
       - name: Extract metrics
         run: |
           mkdir -p results
@@ -103,9 +103,9 @@ jobs:
           echo "Using report: $REPORT_FILE"
 
           python3 scripts/extract_metrics.py \
-          "$REPORT_FILE" \
-          ${{ matrix.config_id }} \
-          results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+            "$REPORT_FILE" \
+            ${{ matrix.config_id }} \
+            results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
 
       - name: Upload results as artifact
         uses: actions/upload-artifact@v4
