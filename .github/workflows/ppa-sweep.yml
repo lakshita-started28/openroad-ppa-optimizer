@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       design:
-        description: "Design name"
+        description: "Design (gcd or aes)"
         required: true
         default: "gcd"
         type: choice
@@ -18,7 +18,7 @@ on:
 
 jobs:
   run-openroad:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     strategy:
       matrix:
@@ -27,87 +27,85 @@ jobs:
       max-parallel: 3
     
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
+      - name: Install OpenROAD
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          
+          # Download prebuilt OpenROAD binary
+          wget https://github.com/The-OpenROAD-Project/OpenROAD/releases/download/v2.0.16697/openroad_2.0_amd64-ubuntu22.04.deb
+          
+          # Install it
+          sudo apt-get install -y ./openroad_2.0_amd64-ubuntu22.04.deb
+          
+          # Verify
+          openroad -version
       
-      - name: Clone OpenROAD-flow-scripts
+      - name: Clone ORFS
         run: |
           git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
-          ls -la OpenROAD-flow-scripts/flow/designs/nangate45/
+          cd OpenROAD-flow-scripts
+          
+          # Install dependencies
+          sudo ./setup.sh
       
-      - name: Create modified config
+      - name: Modify config
         run: |
           python3 scripts/modify_config.py \
             ${{ github.event.inputs.design }} \
             ${{ matrix.config_id }} \
             OpenROAD-flow-scripts
       
-      - name: Run OpenROAD via Docker
+      - name: Run flow to placement
         run: |
           cd OpenROAD-flow-scripts/flow
           
-          # Run synthesis + placement only
-          docker run --rm \
-            -v $(pwd):/OpenROAD-flow-scripts/flow \
-            -w /OpenROAD-flow-scripts/flow \
-            openroad/flow-ubuntu22.04:latest \
-            bash -c "make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk synth place"
+          # Run just synthesis + floorplan + placement
+          make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk \
+            do-2_1_floorplan do-3_1_place_gp
           
-          # List what was generated
-          echo "=== Generated files ==="
-          ls -la results/nangate45/${{ github.event.inputs.design }}/base/ || echo "No results"
-          ls -la logs/nangate45/${{ github.event.inputs.design }}/base/ || echo "No logs"
-          ls -la reports/nangate45/${{ github.event.inputs.design }}/base/ || echo "No reports"
+          echo "=== Checking outputs ==="
+          ls -la logs/nangate45/${{ github.event.inputs.design }}/base/
       
-      - name: Extract metrics from logs
+      - name: Extract metrics
         run: |
-          mkdir -p ${{ github.workspace }}/results
+          mkdir -p results
           
-          LOG_DIR="OpenROAD-flow-scripts/flow/logs/nangate45/${{ github.event.inputs.design }}/base"
+          # Extract from floorplan log
+          LOG="OpenROAD-flow-scripts/flow/logs/nangate45/${{ github.event.inputs.design }}/base/2_1_floorplan.log"
           
-          # Try to extract from placement log
-          if [ -f "$LOG_DIR/3_place.log" ]; then
-            echo "Found placement log"
+          if [ -f "$LOG" ]; then
+            AREA=$(grep "Design area" "$LOG" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+            UTIL=$(grep "Util" "$LOG" | grep -oE '[0-9]+\.[0-9]+' | head -1)
             
-            # Extract area from log
-            AREA=$(grep -oP "Design area \K[\d.]+" "$LOG_DIR/3_place.log" | tail -1)
-            CELLS=$(grep -oP "Number of cells: \K\d+" "$LOG_DIR/3_place.log" | tail -1)
-            
-            # Create JSON with extracted data
-            cat > ${{ github.workspace }}/results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
+            cat > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
           {
             "config_id": ${{ matrix.config_id }},
             "design": "${{ github.event.inputs.design }}",
             "area_um2": ${AREA:-null},
-            "cell_count": ${CELLS:-null},
-            "status": "completed"
+            "utilization": ${UTIL:-null},
+            "status": "success"
           }
           EOF
-          
           else
-            echo "No placement log found - creating null result"
-            cat > ${{ github.workspace }}/results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
+            cat > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
           {
             "config_id": ${{ matrix.config_id }},
             "design": "${{ github.event.inputs.design }}",
             "area_um2": null,
-            "cell_count": null,
+            "utilization": null,
             "status": "failed"
           }
           EOF
           fi
           
-          echo "=== Generated JSON ==="
-          cat ${{ github.workspace }}/results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+          cat results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
       
-      - name: Upload result
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: result-${{ github.event.inputs.design }}-${{ matrix.config_id }}
           path: results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
-          retention-days: 5
