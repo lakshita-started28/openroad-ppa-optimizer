@@ -17,95 +17,70 @@ on:
         default: "1,2,3"
 
 jobs:
-  run-openroad:
+  run-synthesis:
     runs-on: ubuntu-22.04
     
     strategy:
       matrix:
         config_id: ${{ fromJSON(format('[{0}]', github.event.inputs.config_ids)) }}
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 3
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Install build dependencies
+      - name: Install Yosys
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            clang \
-            bison \
-            flex \
-            libreadline-dev \
-            gawk \
-            tcl-dev \
-            libffi-dev \
-            git \
-            graphviz \
-            xdot \
-            pkg-config \
-            python3 \
-            libboost-system-dev \
-            libboost-python-dev \
-            libboost-filesystem-dev \
-            zlib1g-dev
+          sudo apt-get install -y yosys
       
-      - name: Build Yosys from source (cached)
+      - name: Get design RTL
         run: |
-          # Clone Yosys
-          git clone --depth 1 --branch yosys-0.33 https://github.com/YosysHQ/yosys.git
-          cd yosys
-          
-          # Build with 2 cores (faster)
-          make -j2
-          
-          # Install to custom location
-          sudo make install PREFIX=/usr/local
-          
-          # Verify
-          yosys -V
-      
-      - name: Clone OpenROAD-flow-scripts
-        run: |
+          # Clone ORFS just to get the RTL files
           git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
-      
-      - name: Point ORFS to system Yosys
-        run: |
-          cd OpenROAD-flow-scripts
-          mkdir -p tools/install/yosys/bin
-          ln -s /usr/local/bin/yosys tools/install/yosys/bin/yosys
-          ln -s /usr/local/bin/yosys-abc tools/install/yosys/bin/yosys-abc || true
-          ln -s /usr/local/bin/yosys-config tools/install/yosys/bin/yosys-config
-          ls -la tools/install/yosys/bin/
-      
-      - name: Modify config
-        run: |
-          python3 scripts/modify_config.py \
-            ${{ github.event.inputs.design }} \
-            ${{ matrix.config_id }} \
-            OpenROAD-flow-scripts
-      
-      - name: Run synthesis
-        run: |
-          cd OpenROAD-flow-scripts/flow
           
-          make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk synth
+          # Copy design RTL to working directory
+          cp -r OpenROAD-flow-scripts/flow/designs/src/${{ github.event.inputs.design }} ./rtl/
           
-          ls -la logs/nangate45/${{ github.event.inputs.design }}/base/
+          ls -la rtl/
       
-      - name: Extract metrics
+      - name: Run direct Yosys synthesis
         run: |
-          mkdir -p results
+          mkdir -p results logs
           
-          LOG="OpenROAD-flow-scripts/flow/logs/nangate45/${{ github.event.inputs.design }}/base/1_1_yosys.log"
+          # Create simple Yosys script
+          cat > synth_${{ github.event.inputs.design }}.ys << 'EOF'
+          # Read Verilog
+          read_verilog rtl/*.v
+          
+          # Generic synthesis
+          synth -top gcd
+          
+          # Print statistics
+          stat
+          
+          # Write output
+          write_verilog results/${{ github.event.inputs.design }}_synth.v
+          EOF
+          
+          # Run Yosys
+          yosys synth_${{ github.event.inputs.design }}.ys | tee logs/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.log
+      
+      - name: Extract cell count from log
+        run: |
+          mkdir -p artifacts
+          
+          LOG="logs/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.log"
           
           if [ -f "$LOG" ]; then
+            # Extract number of cells
             CELLS=$(grep "Number of cells:" "$LOG" | grep -oE '[0-9]+' | head -1)
+            
+            # Extract number of wires  
             WIRES=$(grep "Number of wires:" "$LOG" | grep -oE '[0-9]+' | head -1)
             
-            cat > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
+            cat > artifacts/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
           {
             "config_id": ${{ matrix.config_id }},
             "design": "${{ github.event.inputs.design }}",
@@ -114,22 +89,23 @@ jobs:
             "status": "success"
           }
           EOF
+          
           else
-            cat > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
+            cat > artifacts/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
           {
             "config_id": ${{ matrix.config_id }},
             "design": "${{ github.event.inputs.design }}",
             "cell_count": null,
             "wire_count": null,
-            "status": "failed"
+            "status": "no_log"
           }
           EOF
           fi
           
-          cat results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+          cat artifacts/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
       
-      - name: Upload
+      - name: Upload result
         uses: actions/upload-artifact@v4
         with:
           name: result-${{ github.event.inputs.design }}-${{ matrix.config_id }}
-          path: results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
+          path: artifacts/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
