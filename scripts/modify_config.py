@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
 import sys
 import os
-from param_grid import PARAM_GRID
+
+# Parameter grid defined here
+PARAM_GRID = {
+    1:  {'util': 40, 'density': 0.55, 'buf': 'BUF_X2'},
+    2:  {'util': 40, 'density': 0.65, 'buf': 'BUF_X2'},
+    3:  {'util': 50, 'density': 0.55, 'buf': 'BUF_X2'},
+    4:  {'util': 50, 'density': 0.65, 'buf': 'BUF_X2'},
+    5:  {'util': 50, 'density': 0.70, 'buf': 'BUF_X2'},
+    6:  {'util': 60, 'density': 0.60, 'buf': 'BUF_X2'},
+    7:  {'util': 60, 'density': 0.70, 'buf': 'BUF_X2'},
+    8:  {'util': 60, 'density': 0.75, 'buf': 'BUF_X2'},
+    9:  {'util': 70, 'density': 0.65, 'buf': 'BUF_X2'},
+    10: {'util': 70, 'density': 0.75, 'buf': 'BUF_X2'},
+}
 
 def modify_config(design, config_id, orfs_path):
     """Modify OpenROAD config.mk with parameters from PARAM_GRID"""
