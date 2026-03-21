@@ -30,12 +30,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Install Yosys
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yosys
-          yosys -version
-          which yosys
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            bison \
+            flex \
+            libreadline-dev \
+            gawk \
+            tcl-dev \
+            libffi-dev \
+            git \
+            graphviz \
+            xdot \
+            pkg-config \
+            python3 \
+            libboost-system-dev \
+            libboost-python-dev \
+            libboost-filesystem-dev \
+            zlib1g-dev
+      
+      - name: Build Yosys from source (cached)
+        run: |
+          # Clone Yosys
+          git clone --depth 1 --branch yosys-0.33 https://github.com/YosysHQ/yosys.git
+          cd yosys
+          
+          # Build with 2 cores (faster)
+          make -j2
+          
+          # Install to custom location
+          sudo make install PREFIX=/usr/local
+          
+          # Verify
+          yosys -V
       
       - name: Clone OpenROAD-flow-scripts
         run: |
@@ -44,16 +74,10 @@ jobs:
       - name: Point ORFS to system Yosys
         run: |
           cd OpenROAD-flow-scripts
-          
-          # Create fake tool directory structure
           mkdir -p tools/install/yosys/bin
-          
-          # Symlink system yosys to where ORFS expects it
-          ln -s /usr/bin/yosys tools/install/yosys/bin/yosys
-          ln -s /usr/bin/yosys-abc tools/install/yosys/bin/yosys-abc
-          ln -s /usr/bin/yosys-config tools/install/yosys/bin/yosys-config
-          
-          # Verify
+          ln -s /usr/local/bin/yosys tools/install/yosys/bin/yosys
+          ln -s /usr/local/bin/yosys-abc tools/install/yosys/bin/yosys-abc || true
+          ln -s /usr/local/bin/yosys-config tools/install/yosys/bin/yosys-config
           ls -la tools/install/yosys/bin/
       
       - name: Modify config
@@ -67,10 +91,8 @@ jobs:
         run: |
           cd OpenROAD-flow-scripts/flow
           
-          # Run synthesis with system Yosys
           make DESIGN_CONFIG=./designs/nangate45/${{ github.event.inputs.design }}/config_run${{ matrix.config_id }}.mk synth
           
-          echo "=== Synthesis logs ==="
           ls -la logs/nangate45/${{ github.event.inputs.design }}/base/
       
       - name: Extract metrics
@@ -80,8 +102,6 @@ jobs:
           LOG="OpenROAD-flow-scripts/flow/logs/nangate45/${{ github.event.inputs.design }}/base/1_1_yosys.log"
           
           if [ -f "$LOG" ]; then
-            echo "=== Found synthesis log ==="
-            
             CELLS=$(grep "Number of cells:" "$LOG" | grep -oE '[0-9]+' | head -1)
             WIRES=$(grep "Number of wires:" "$LOG" | grep -oE '[0-9]+' | head -1)
             
@@ -94,22 +114,18 @@ jobs:
             "status": "success"
           }
           EOF
-          
           else
-            echo "ERROR: Synthesis log not found"
-            
             cat > results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json << EOF
           {
             "config_id": ${{ matrix.config_id }},
             "design": "${{ github.event.inputs.design }}",
             "cell_count": null,
             "wire_count": null,
-            "status": "log_missing"
+            "status": "failed"
           }
           EOF
           fi
           
-          echo "=== Generated JSON ==="
           cat results/${{ github.event.inputs.design }}_config${{ matrix.config_id }}.json
       
       - name: Upload
