@@ -2,18 +2,19 @@
 import sys
 import os
 
-# Parameter grid defined here
+# Parameter grid with SYNTHESIS-LEVEL variations
 PARAM_GRID = {
-    1:  {'util': 40, 'density': 0.55, 'buf': 'BUF_X2'},
-    2:  {'util': 40, 'density': 0.65, 'buf': 'BUF_X2'},
-    3:  {'util': 50, 'density': 0.55, 'buf': 'BUF_X2'},
-    4:  {'util': 50, 'density': 0.65, 'buf': 'BUF_X2'},
-    5:  {'util': 50, 'density': 0.70, 'buf': 'BUF_X2'},
-    6:  {'util': 60, 'density': 0.60, 'buf': 'BUF_X2'},
-    7:  {'util': 60, 'density': 0.70, 'buf': 'BUF_X2'},
-    8:  {'util': 60, 'density': 0.75, 'buf': 'BUF_X2'},
-    9:  {'util': 70, 'density': 0.65, 'buf': 'BUF_X2'},
-    10: {'util': 70, 'density': 0.75, 'buf': 'BUF_X2'},
+    # Original configs (placement-level params - will show identical synthesis)
+    1:  {'util': 40, 'density': 0.55, 'buf': 'BUF_X2', 'abc_script': 'area'},
+    2:  {'util': 40, 'density': 0.65, 'buf': 'BUF_X2', 'abc_script': 'area'},
+    3:  {'util': 50, 'density': 0.55, 'buf': 'BUF_X2', 'abc_script': 'area'},
+    4:  {'util': 50, 'density': 0.65, 'buf': 'BUF_X2', 'abc_script': 'area'},
+    5:  {'util': 50, 'density': 0.70, 'buf': 'BUF_X2', 'abc_script': 'area'},
+    
+    # NEW: Synthesis-level variations (ABC optimization strategy)
+    11: {'util': 50, 'density': 0.65, 'buf': 'BUF_X2', 'abc_script': 'area'},   # Area-optimized
+    12: {'util': 50, 'density': 0.65, 'buf': 'BUF_X2', 'abc_script': 'delay'},  # Delay-optimized
+    13: {'util': 50, 'density': 0.65, 'buf': 'BUF_X2', 'abc_script': 'default'}, # Balanced
 }
 
 def modify_config(design, config_id, orfs_path):
@@ -43,14 +44,22 @@ def modify_config(design, config_id, orfs_path):
             modified.append(f'export PLACE_DENSITY = {params["density"]}\n')
         elif 'export CTS_BUF_LIST' in line:
             modified.append(f'export CTS_BUF_LIST = {params["buf"]}\n')
+        elif 'export ABC_AREA' in line and params['abc_script'] != 'area':
+            # Comment out area optimization if not area mode
+            modified.append(f'# {line}')
         else:
             modified.append(line)
+    
+    # Add ABC script selection
+    if params['abc_script'] == 'delay':
+        modified.append('\nexport SYNTH_HIERARCHICAL = 0\n')
+        modified.append('export ABC_SPEED = 1\n')
     
     with open(run_config, 'w') as f:
         f.writelines(modified)
     
     print(f"Created config: {run_config}")
-    print(f"  CORE_UTIL={params['util']}, PLACE_DENSITY={params['density']}, CTS_BUF={params['buf']}")
+    print(f"  CORE_UTIL={params['util']}, DENSITY={params['density']}, ABC={params['abc_script']}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
