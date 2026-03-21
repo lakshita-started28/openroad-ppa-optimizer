@@ -30,20 +30,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       
-      - name: Free disk space
+      - name: Install Yosys only
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          df -h
+          sudo apt-get update
+          sudo apt-get install -y yosys
+          yosys -version
       
       - name: Clone OpenROAD-flow-scripts
         run: |
           git clone --depth 1 https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
-      
-      - name: Install OpenROAD
-        run: |
-          cd OpenROAD-flow-scripts
-          sudo ./setup.sh
       
       - name: Modify config
         run: |
